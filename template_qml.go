@@ -21,6 +21,126 @@ var __IFC_TEMPLATE_QML = `
 class {{ExportName}}Proxyer: public QDBusAbstractInterface
 {
     Q_OBJECT
+    void _hookSignals() {
+    {{range .Signals}}
+        connection().connect( service(), path(), interface(), "{{.Name}}", this, SLOT(_handleSignal(QDBusMessage)));{{end}}
+    }
+
+    QString makeSignal( const QString &sig ) const {
+        QChar first = sig[0];
+	QString result = sig;
+	return result.replace(0,1,first.toLower());
+    }
+
+    Q_SLOT void _handleSignal( const QDBusMessage &msg ) {
+	if ( msg.type() == QDBusMessage::SignalMessage ) {
+		if ( msg.interface() != interface() )
+			    return;
+
+		if ( msg.path() != path() )
+			    return;
+
+		QByteArray member = makeSignal(msg.member()).toLatin1();
+		QVariantList args;
+		foreach( QVariant arg, msg.arguments() ) {
+			args << unmarsh(arg);
+		}
+
+		switch ( args.count() ) {
+			case 0:
+				QMetaObject::invokeMethod(parent(), member.constData() );
+			break;
+			case 1:
+			{
+				QMetaObject::invokeMethod(parent(), member.constData(),
+					QGenericArgument( args[0].typeName(), args[0].data() ));
+			}
+			break;
+
+			case 2:
+			{
+				QMetaObject::invokeMethod(parent(), member.constData(),
+					QGenericArgument( args[0].typeName(), args[0].data() ),
+					QGenericArgument( args[1].typeName(), args[1].data() ));
+			}
+			break;
+
+			case 3:
+			{
+				QMetaObject::invokeMethod(parent(), member.constData(),
+					QGenericArgument( args[0].typeName(), args[0].data() ),
+					QGenericArgument( args[1].typeName(), args[1].data() ),
+					QGenericArgument( args[2].typeName(), args[2].data() ));
+			}
+			break;
+
+			case 4:
+			{
+				QMetaObject::invokeMethod(parent(), member.constData(),
+					QGenericArgument( args[0].typeName(), args[0].data() ),
+					QGenericArgument( args[1].typeName(), args[1].data() ),
+					QGenericArgument( args[2].typeName(), args[2].data() ),
+					QGenericArgument( args[3].typeName(), args[3].data() ));
+			}
+			break;
+
+			case 5:
+			{
+				QMetaObject::invokeMethod(parent(), member.constData(),
+					QGenericArgument( args[0].typeName(), args[0].data() ),
+					QGenericArgument( args[1].typeName(), args[1].data() ),
+					QGenericArgument( args[2].typeName(), args[2].data() ),
+					QGenericArgument( args[3].typeName(), args[3].data() ),
+					QGenericArgument( args[4].typeName(), args[4].data() ));
+			}
+			break;
+
+			case 6:
+			{
+				QMetaObject::invokeMethod(parent(), member.constData(),
+					QGenericArgument( args[0].typeName(), args[0].data() ),
+					QGenericArgument( args[1].typeName(), args[1].data() ),
+					QGenericArgument( args[2].typeName(), args[2].data() ),
+					QGenericArgument( args[3].typeName(), args[3].data() ),
+					QGenericArgument( args[4].typeName(), args[4].data() ),
+					QGenericArgument( args[5].typeName(), args[5].data() ));
+			}
+			break;
+
+			case 7:
+			{
+				QMetaObject::invokeMethod(parent(), member.constData(),
+					QGenericArgument( args[0].typeName(), args[0].data() ),
+					QGenericArgument( args[1].typeName(), args[1].data() ),
+					QGenericArgument( args[2].typeName(), args[2].data() ),
+					QGenericArgument( args[3].typeName(), args[3].data() ),
+					QGenericArgument( args[4].typeName(), args[4].data() ),
+					QGenericArgument( args[5].typeName(), args[5].data() ),
+					QGenericArgument( args[6].typeName(), args[6].data() ));
+			}
+			break;
+
+			case 8:
+			{
+				QMetaObject::invokeMethod(parent(), member.constData(),
+					QGenericArgument( args[0].typeName(), args[0].data() ),
+					QGenericArgument( args[1].typeName(), args[1].data() ),
+					QGenericArgument( args[2].typeName(), args[2].data() ),
+					QGenericArgument( args[3].typeName(), args[3].data() ),
+					QGenericArgument( args[4].typeName(), args[4].data() ),
+					QGenericArgument( args[5].typeName(), args[5].data() ),
+					QGenericArgument( args[6].typeName(), args[6].data() ),
+					QGenericArgument( args[7].typeName(), args[7].data() ));
+			}
+			break;
+
+			default:
+			break;
+		}
+	}
+
+    }
+
 public:
     {{ExportName}}Proxyer(const QString &path, QObject* parent)
           :QDBusAbstractInterface("{{DestName}}", path, "{{IfcName}}", QDBusConnection::{{BusType}}Bus(), parent)
@@ -28,6 +148,7 @@ public:
 	    if (!isValid()) {
 		    qDebug() << "Create {{ExportName}} remote object failed : " << lastError().message();
 	    }
+	    _hookSignals();
     }
     QVariant fetchProperty(const char* name) {
 	QDBusMessage msg = QDBusMessage::createMethodCall(service(), path(),
@@ -55,11 +176,9 @@ public:
     {{if PropWritable .}}void __set_{{.Name}}__(const QDBusVariant &v) { setProperty("{{.Name}}", QVariant::fromValue(v)); }{{end}}
 {{end}}
 
-Q_SIGNALS:{{range .Signals}}
-    void {{.Name}}({{range $i, $e := .Args}}{{if ne $i 0}},{{end}}{{getQType $e.Type}} {{$e.Name}}{{end}});{{end}}
 };
 
-class {{ExportName}} : public QObject 
+class {{ExportName}} : public QObject
 {
     Q_OBJECT
 private:
@@ -80,18 +199,12 @@ private:
 		    }
 	    }
     }
-    void _rebuild() 
-    { 
+    void _rebuild()
+    {
 	  delete m_ifc;
           m_ifc = new {{ExportName}}Proxyer(m_path, this);
-	  _setupSignalHandle();
     }
-    void _setupSignalHandle() {
-{{range .Signals}}
-	  QObject::connect(m_ifc, SIGNAL({{.Name}}({{range $i, $e := .Args}}{{if ne $i 0}},{{end}}{{getQType $e.Type}}{{end}})), 
-	  		this, SIGNAL({{Lower .Name}}({{range $i, $e := .Args}}{{if ne $i 0}},{{end}}{{getQType $e.Type}}{{end}})));
-{{end}}
-    }
+
 public:
     Q_PROPERTY(QString path READ path WRITE setPath NOTIFY pathChanged)
     const QString path() {
@@ -109,7 +222,6 @@ public:
 
     {{ExportName}}(QObject *parent=0) : QObject(parent), m_ifc(new {{ExportName}}Proxyer("{{Ifc2Obj IfcName}}", this))
     {
-	    _setupSignalHandle();
 	    QDBusConnection::{{BusType}}Bus().connect("{{DestName}}", m_path, "org.freedesktop.DBus.Properties", "PropertiesChanged",
 	    				"sa{sv}as", this, SLOT(_propertiesChanged(QDBusMessage)));
     }
@@ -192,7 +304,7 @@ class DBusPlugin: public QQmlExtensionPlugin
 
 var __PROJECT_TEMPL_QML = `
 TEMPLATE=lib
-CONFIC += plugin
+CONFIG += plugin
 QT += qml dbus
 
 TARGET = {{PkgName}}

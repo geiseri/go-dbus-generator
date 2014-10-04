@@ -32,6 +32,11 @@ func normalizeQDBus(v string) (r string) {
 }
 
 func getQType(sig string) string {
+
+        if sig[0] == 'o' {
+		return "QString"
+	}
+
 	if qtype, ok := _sig2QType[sig[0]]; ok {
 		return qtype
 	}
@@ -42,11 +47,29 @@ func getQType(sig string) string {
 			r := "QMap<"
 			r += getQType(string(sig[2])) + ", "
 			r += getQType(sig[3:i])
-			return r + " >"
+			r += " >"
+			if r == "QMap<QString,QVariant >" {
+			    return "QVariantMap"
+			} else if r == "QMap<QString, QVariantMap >" {
+                             return "QVariantMap"
+			} else if r == "QMap<QString, QDBusVariant >" {
+			    return "QVariantMap"
+			} else {
+				return r
+			}
 		} else {
 			r := "QList<"
 			r += getQType(sig[1:])
-			return r + " >"
+			r += " >"
+			if r == "QList<QString >" {
+			    return "QStringList"
+			} else if r == "QList<QVariant >" {
+			    return "QVariantList"
+			} else if r == "QList<QDBusVariant >" {
+			    return "QVariantList"
+			} else {
+				return r
+			}
 		}
 	case '(':
 		return "QVariant"
