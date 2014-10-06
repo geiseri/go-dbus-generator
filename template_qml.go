@@ -22,14 +22,9 @@ class {{ExportName}}Proxyer: public QDBusAbstractInterface
 {
     Q_OBJECT
     void _hookSignals() {
+        connection().connect(service(), path(), "org.freedesktop.DBus.Properties", "PropertiesChanged", parent(), SLOT(_propertiesChanged(QDBusMessage)));
     {{range .Signals}}
         connection().connect( service(), path(), interface(), "{{.Name}}", this, SLOT(_handleSignal(QDBusMessage)));{{end}}
-    }
-
-    QString makeSignal( const QString &sig ) const {
-        QChar first = sig[0];
-	QString result = sig;
-	return result.replace(0,1,first.toLower());
     }
 
     Q_SLOT void _handleSignal( const QDBusMessage &msg ) {
@@ -40,102 +35,17 @@ class {{ExportName}}Proxyer: public QDBusAbstractInterface
 		if ( msg.path() != path() )
 			    return;
 
-		QByteArray member = makeSignal(msg.member()).toLatin1();
 		QVariantList args;
 		foreach( QVariant arg, msg.arguments() ) {
 			args << unmarsh(arg);
 		}
 
-		switch ( args.count() ) {
-			case 0:
-				QMetaObject::invokeMethod(parent(), member.constData() );
-			break;
-			case 1:
-			{
-				QMetaObject::invokeMethod(parent(), member.constData(),
-					QGenericArgument( args[0].typeName(), args[0].data() ));
-			}
-			break;
-
-			case 2:
-			{
-				QMetaObject::invokeMethod(parent(), member.constData(),
-					QGenericArgument( args[0].typeName(), args[0].data() ),
-					QGenericArgument( args[1].typeName(), args[1].data() ));
-			}
-			break;
-
-			case 3:
-			{
-				QMetaObject::invokeMethod(parent(), member.constData(),
-					QGenericArgument( args[0].typeName(), args[0].data() ),
-					QGenericArgument( args[1].typeName(), args[1].data() ),
-					QGenericArgument( args[2].typeName(), args[2].data() ));
-			}
-			break;
-
-			case 4:
-			{
-				QMetaObject::invokeMethod(parent(), member.constData(),
-					QGenericArgument( args[0].typeName(), args[0].data() ),
-					QGenericArgument( args[1].typeName(), args[1].data() ),
-					QGenericArgument( args[2].typeName(), args[2].data() ),
-					QGenericArgument( args[3].typeName(), args[3].data() ));
-			}
-			break;
-
-			case 5:
-			{
-				QMetaObject::invokeMethod(parent(), member.constData(),
-					QGenericArgument( args[0].typeName(), args[0].data() ),
-					QGenericArgument( args[1].typeName(), args[1].data() ),
-					QGenericArgument( args[2].typeName(), args[2].data() ),
-					QGenericArgument( args[3].typeName(), args[3].data() ),
-					QGenericArgument( args[4].typeName(), args[4].data() ));
-			}
-			break;
-
-			case 6:
-			{
-				QMetaObject::invokeMethod(parent(), member.constData(),
-					QGenericArgument( args[0].typeName(), args[0].data() ),
-					QGenericArgument( args[1].typeName(), args[1].data() ),
-					QGenericArgument( args[2].typeName(), args[2].data() ),
-					QGenericArgument( args[3].typeName(), args[3].data() ),
-					QGenericArgument( args[4].typeName(), args[4].data() ),
-					QGenericArgument( args[5].typeName(), args[5].data() ));
-			}
-			break;
-
-			case 7:
-			{
-				QMetaObject::invokeMethod(parent(), member.constData(),
-					QGenericArgument( args[0].typeName(), args[0].data() ),
-					QGenericArgument( args[1].typeName(), args[1].data() ),
-					QGenericArgument( args[2].typeName(), args[2].data() ),
-					QGenericArgument( args[3].typeName(), args[3].data() ),
-					QGenericArgument( args[4].typeName(), args[4].data() ),
-					QGenericArgument( args[5].typeName(), args[5].data() ),
-					QGenericArgument( args[6].typeName(), args[6].data() ));
-			}
-			break;
-
-			case 8:
-			{
-				QMetaObject::invokeMethod(parent(), member.constData(),
-					QGenericArgument( args[0].typeName(), args[0].data() ),
-					QGenericArgument( args[1].typeName(), args[1].data() ),
-					QGenericArgument( args[2].typeName(), args[2].data() ),
-					QGenericArgument( args[3].typeName(), args[3].data() ),
-					QGenericArgument( args[4].typeName(), args[4].data() ),
-					QGenericArgument( args[5].typeName(), args[5].data() ),
-					QGenericArgument( args[6].typeName(), args[6].data() ),
-					QGenericArgument( args[7].typeName(), args[7].data() ));
-			}
-			break;
-
-			default:
-			break;
+		if (0) { {{range .Signals}}
+		} else if ( QByteArray("{{.Name}}") == msg.member() ) {
+                     QMetaObject::invokeMethod(parent(), "{{Lower .Name}}" {{range $i, $e := .Args}},
+						Q_ARG({{getQType $e.Type}},args[{{$i}}].value<{{getQType $e.Type}} >()){{end}});{{end}}
+                } else {
+		    qDebug() << "Could not forward" << msg.member();
 		}
 	}
 
@@ -150,7 +60,13 @@ public:
 	    }
 	    _hookSignals();
     }
-    QVariant fetchProperty(const char* name) {
+
+    ~{{ExportName}}Proxyer() {
+        connection().disconnect(service(), path(), "org.freedesktop.DBus.Properties", "PropertiesChanged",
+	    				 parent(), SLOT(_propertiesChanged(QDBusMessage)));
+    }
+
+    QVariant fetchProperty(const char* name) const {
 	QDBusMessage msg = QDBusMessage::createMethodCall(service(), path(),
 		QLatin1String("org.freedesktop.DBus.Properties"),
 		QLatin1String("Get"));
@@ -165,15 +81,14 @@ public:
 	    qDebug () << QDBusError(QDBusError::InvalidSignature, errmsg.arg(reply.signature()));
 	    return QVariant();
 	}
-
-	QVariant value = qvariant_cast<QDBusVariant>(reply.arguments().at(0)).variant();
+	QVariant value = unmarsh(reply.arguments().at(0));
+	qDebug() << Q_FUNC_INFO << name << value;
 	return value;
     }
 
 {{range .Properties}}
-    Q_PROPERTY(QDBusVariant {{.Name}} READ __get_{{.Name}}__ {{if PropWritable .}}WRITE __set_{{.Name}}__{{end}})
-    QDBusVariant __get_{{.Name}}__() { return QDBusVariant(fetchProperty("{{.Name}}")); }
-    {{if PropWritable .}}void __set_{{.Name}}__(const QDBusVariant &v) { setProperty("{{.Name}}", QVariant::fromValue(v)); }{{end}}
+    QVariant __get_{{.Name}}__() const { return fetchProperty("{{.Name}}"); }
+    {{if PropWritable .}}void __set_{{.Name}}__(const QVariant &v) { setProperty("{{.Name}}", v); }{{end}}
 {{end}}
 
 };
@@ -193,9 +108,10 @@ private:
 
 	    QVariantMap changedProps = qdbus_cast<QVariantMap>(arguments.at(1).value<QDBusArgument>());
 	    foreach(const QString &prop, changedProps.keys()) {
+	    qDebug() << Q_FUNC_INFO << prop;
 		    if (0) { {{range .Properties}}
 		    } else if (prop == "{{.Name}}") {
-			    Q_EMIT __{{Lower .Name}}Changed__(unmarsh(changedProps.value(prop)));{{end}}
+			    Q_EMIT __{{Lower .Name}}Changed__();{{end}}
 		    }
 	    }
     }
@@ -211,36 +127,35 @@ public:
 	    return m_path;
     }
     void setPath(const QString& path) {
-	    QDBusConnection::{{BusType}}Bus().disconnect("{{DestName}}", m_path, "org.freedesktop.DBus.Properties", "PropertiesChanged",
-	    				 this, SLOT(_propertiesChanged(QDBusMessage)));
-	    m_path = path;
-	    QDBusConnection::{{BusType}}Bus().connect("{{DestName}}", m_path, "org.freedesktop.DBus.Properties", "PropertiesChanged",
-	    				"sa{sv}as", this, SLOT(_propertiesChanged(QDBusMessage)));
-	    _rebuild();
+	m_path = path;
+	_rebuild();
+
     }
     Q_SIGNAL void pathChanged(QString);
 
     {{ExportName}}(QObject *parent=0) : QObject(parent), m_ifc(new {{ExportName}}Proxyer("{{Ifc2Obj IfcName}}", this))
     {
-	    QDBusConnection::{{BusType}}Bus().connect("{{DestName}}", m_path, "org.freedesktop.DBus.Properties", "PropertiesChanged",
-	    				"sa{sv}as", this, SLOT(_propertiesChanged(QDBusMessage)));
+
     }
     {{range .Properties}}
-    Q_PROPERTY(QVariant {{Lower .Name}} READ __get_{{.Name}}__ {{if PropWritable .}}WRITE __set_{{.Name}}__{{end}} NOTIFY __{{Lower .Name}}Changed__){{end}}
+    Q_PROPERTY({{getQType .Type}} {{Lower .Name}} READ __get_{{.Name}}__ {{if PropWritable .}}WRITE __set_{{.Name}}__{{end}} NOTIFY __{{Lower .Name}}Changed__){{end}}
 
     //Property read methods{{range .Properties}}
-    const QVariant __get_{{.Name}}__() { return unmarsh(m_ifc->__get_{{.Name}}__().variant()); }{{end}}
+    {{getQType .Type}} __get_{{.Name}}__() const { return m_ifc->__get_{{.Name}}__().value<{{getQType .Type}} >(); }{{end}}
     //Property set methods :TODO check access{{range .Properties}}{{if PropWritable .}}
-    void __set_{{.Name}}__(const QVariant &v) {
-	    QVariant marshedValue = marsh(QDBusArgument(), v, "{{.Type}}");
-	    m_ifc->__set_{{.Name}}__(QDBusVariant(marshedValue));
-	    Q_EMIT __{{Lower .Name}}Changed__(marshedValue);
+    void __set_{{.Name}}__(const {{getQType .Type}} &v) {
+            if ( v != __get_{{.Name}}__() ) {
+	        QVariant marshedValue = marsh(QDBusArgument(), v, "{{.Type}}");
+	        m_ifc->__set_{{.Name}}__(marshedValue);
+	        Q_EMIT __{{Lower .Name}}Changed__();
+	    }
     }{{end}}{{end}}
 
 public Q_SLOTS:{{range .Methods}}
     QVariant {{.Name}}({{range $i, $e := GetOuts .Args}}{{if ne $i 0}}, {{end}}const QVariant &{{.Name}}{{end}}) {
 	    QList<QVariant> argumentList;
-	    argumentList{{range GetOuts .Args}} << marsh(QDBusArgument(), {{.Name}}, "{{.Type}}"){{end}};
+	    {{range GetOuts .Args}}
+	    argumentList << marsh(QDBusArgument(), {{.Name}}, "{{.Type}}");{{end}}
 
 	    QDBusPendingReply<> call = m_ifc->asyncCallWithArgumentList(QLatin1String("{{.Name}}"), argumentList);
 	    call.waitForFinished();
@@ -268,7 +183,7 @@ public Q_SLOTS:{{range .Methods}}
 
 Q_SIGNALS:
 //Property changed notify signal{{range .Properties}}
-    void __{{Lower .Name}}Changed__(QVariant);{{end}}
+    void __{{Lower .Name}}Changed__();{{end}}
 
 //DBus Interface's signal{{range .Signals}}
     void {{Lower .Name}}({{range $i, $e := .Args}}{{if ne $i 0}},{{end}}{{getQType $e.Type}} {{$e.Name}}{{end}});{{end}}
@@ -288,16 +203,37 @@ var __GLOBAL_TEMPLATE_QML = `
 #include <QQmlExtensionPlugin>
 #include <qqml.h>
 
+struct TypeMapping {
+    QString signature;
+    int metatype;
+};
+
+static TypeMapping __types [] =
+{
+    { QLatin1String("iiii"), qMetaTypeId<QRect>() },
+    {{ range $key, $value := GetQtSignaturesType }}
+        { QLatin1String("{{$key}}"), qDBusRegisterMetaType<{{$value}} >()},{{end}}
+   { QString(), -1 }
+};
+
 class DBusPlugin: public QQmlExtensionPlugin
 {
     Q_OBJECT
         Q_PLUGIN_METADATA(IID "com.deepin.dde.daemon.DBus")
 
     public:
+
         void registerTypes(const char* uri) { {{range .Interfaces}}
              qmlRegisterType<{{.ObjectName}}>(uri, 1, 0, "{{.ObjectName}}");{{end}}
-        }
+
+
+	}
 };
+{{ range $key, $value := GetQtSignaturesType }}
+//TODO: make sure these are unique
+//Q_DECLARE_METATYPE({{$value}})
+{{end}}
+
 ` + _templateMarshUnMarsh + `
 #endif
 `
@@ -431,31 +367,16 @@ func qtPropertyFilter(s string) string {
 	return s
 }
 
-var sigToQtType = map[string]string{
-	"y": "uchar",
-	"b": "bool",
-	"n": "short",
-	"q": "ushort",
-	"i": "int",
-	"u": "uint",
-	"x": "qlonglong",
-	"t": "qulonglong",
-	"d": "double",
-	"s": "QString",
-	"g": "QDBusVariant",
-	"o": "QDBusObjectPath",
-	"v": "QDBusSignature",
-	"h": "uint",
-}
-
 func getQtSignaturesType() (sigs map[string]string) {
 	sigs = make(map[string]string)
 	var store func(string)
 	store = func(sig string) {
-		if v, ok := sigToQtType[sig]; ok {
+		if v, ok := _sig2QType[sig]; ok {
 			sigs[sig] = v
 		} else if sig == "as" {
 			sigs[sig] = "QStringList"
+		} else if sig == "ay" {
+		        sigs[sig] = "QString"
 		} else if sig == "so" {
 			fmt.Println("Warning: `so` isn't supported")
 			sigs[sig] = "QStringList"
@@ -500,16 +421,14 @@ func getQtSignaturesType() (sigs map[string]string) {
 
 var _templateMarshUnMarsh = `
 inline
+
 int getTypeId(const QString& sig) {
-    //TODO: this should staticly generate by xml info
-    if (0) { {{ range $key, $value := GetQtSignaturesType }}
-    } else if (sig == "{{$key}}") {
-	    return qDBusRegisterMetaType<{{$value}} >();{{end}}
-    } else if (sig == "(iiii)") {
-	    return qDBusRegisterMetaType<QRect>();
-    } else {
-	    qDebug() << "Didn't support getTypeId" << sig << " please report it to snyh@snyh.org";
-    }
+    TypeMapping *mapping = __types;
+     while( mapping->signature != QString() ) {
+         if ( mapping->signature == sig ) return mapping->metatype;
+	 mapping++;
+     }
+     return -1;
 }
 
 inline
@@ -535,8 +454,6 @@ QVariant qstring2dbus(QString value, char sig) {
             return QVariant::fromValue(value);
         case 'o':
             return QVariant::fromValue(QDBusObjectPath(value));
-        case 'v':
-            return QVariant::fromValue(QDBusSignature(value));
         default:
             qDebug() << "Dict entry key should be an basic dbus type not an " << sig;
             return QVariant();
@@ -603,40 +520,51 @@ QVariant marsh(QDBusArgument target, const QVariant& arg, const QString& sig) {
         case 'y':
             target << qstring2dbus(arg.value<QString>(), 'y').value<uchar>();
             return QVariant::fromValue(target);
+	    break;
         case 'b':
             target << arg.value<bool>();
             return QVariant::fromValue(target);
+	    break;
         case 'n':
             target << arg.value<short>();
             return QVariant::fromValue(target);
+	    break;
         case 'q':
             target << arg.value<ushort>();
             return QVariant::fromValue(target);
+	    break;
         case 'i':
             target << arg.value<qint32>();
             return QVariant::fromValue(target);
+	    break;
         case 'u':
             target << arg.value<quint32>();
             return QVariant::fromValue(target);
+	    break;
         case 'x':
             target << arg.value<qlonglong>();
             return QVariant::fromValue(target);
+	    break;
         case 't':
             target << arg.value<qulonglong>();
             return QVariant::fromValue(target);
+	    break;
         case 'd':
             target << arg.value<double>();
             return QVariant::fromValue(target);
+	    break;
         case 's':
             target << arg.value<QString>();
             return QVariant::fromValue(target);
+	    break;
         case 'o':
             target << QDBusObjectPath(arg.value<QString>());
             return QVariant::fromValue(target);
+	    break;
         case 'g':
             target << QDBusSignature(arg.value<QString>());
             return QVariant::fromValue(target);
-
+	    break;
         case 'a':
             {
                 if (sig.size() < 2) { return QVariant(); }
@@ -668,6 +596,7 @@ QVariant marsh(QDBusArgument target, const QVariant& arg, const QString& sig) {
                     return QVariant::fromValue(target);
                 }
             }
+	    break;
         case '(':
             {
                 QList<QString> sigs = splitStructureSignature(sig);
@@ -683,8 +612,10 @@ QVariant marsh(QDBusArgument target, const QVariant& arg, const QString& sig) {
                 target.endStructure();
                 return QVariant::fromValue(target);
             }
+	    break;
         default:
             qDebug() << "Panic didn't support marsh" << sig;
+	    break;
     }
     return QVariant::fromValue(target);
 }
@@ -703,9 +634,13 @@ QVariant unmarshDBus(const QDBusArgument &argument)
             return v;
     }
     case QDBusArgument::VariantType: {
+
         QVariant v = argument.asVariant().value<QDBusVariant>().variant();
+	qDebug() << Q_FUNC_INFO << v.typeName();
         if (v.userType() == qMetaTypeId<QDBusArgument>())
             return unmarshDBus(v.value<QDBusArgument>());
+	else if (v.userType() == qMetaTypeId<QDBusVariant>())
+            return v.value<QDBusVariant>().variant();
         else
             return v;
     }
@@ -749,8 +684,10 @@ QVariant unmarsh(const QVariant& v) {
         return QVariant::fromValue(v.value<QDBusObjectPath>().path());
     } else if (v.userType() == qMetaTypeId<QDBusArgument>()) {
         return unmarsh(unmarshDBus(v.value<QDBusArgument>()));
+    } else if (v.userType() == qMetaTypeId<QDBusVariant>()) {
+        return unmarsh( v.value<QDBusVariant>().variant());
     } else if (v.userType() == qMetaTypeId<QByteArray>()) {
-        return QString(v.value<QByteArray>());
+        return QVariant::fromValue(QString::fromLatin1(v.value<QByteArray>()));
     }
     return v;
 }

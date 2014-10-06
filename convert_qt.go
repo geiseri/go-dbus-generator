@@ -2,20 +2,21 @@ package main
 
 import "strings"
 
-var _sig2QType = map[byte]string{
-	'y': "uchar",
-	'b': "bool",
-	'n': "short",
-	'q': "ushort",
-	'i': "int",
-	'u': "uint",
-	'x': "qlonglong",
-	't': "qulonglong",
-	'd': "double",
-	's': "QString",
-	'g': "QDBusOSignature",
-	'o': "QDBusObjectPath",
-	'v': "QDBusVariant",
+var _sig2QType = map[string]string{
+	"y": "uchar",
+	"b": "bool",
+	"n": "short",
+	"q": "ushort",
+	"i": "int",
+	"u": "uint",
+	"x": "qlonglong",
+	"t": "qulonglong",
+	"d": "double",
+	"s": "QString",
+	"g": "QDBusOSignature",
+	"o": "QDBusObjectPath",
+	"v": "QDBusVariant",
+	"h": "uint",
 }
 
 var _convertQDBus = map[string]string{
@@ -37,7 +38,11 @@ func getQType(sig string) string {
 		return "QString"
 	}
 
-	if qtype, ok := _sig2QType[sig[0]]; ok {
+        if sig == "ay" {
+	       return "QString"
+	}
+
+	if qtype, ok := _sig2QType[string(sig[0])]; ok {
 		return qtype
 	}
 	switch sig[0] {
@@ -48,7 +53,7 @@ func getQType(sig string) string {
 			r += getQType(string(sig[2])) + ", "
 			r += getQType(sig[3:i])
 			r += " >"
-			if r == "QMap<QString,QVariant >" {
+			if r == "QMap<QString, QVariant >" {
 			    return "QVariantMap"
 			} else if r == "QMap<QString, QVariantMap >" {
                              return "QVariantMap"
