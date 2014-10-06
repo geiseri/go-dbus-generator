@@ -82,7 +82,7 @@ public:
 	    return QVariant();
 	}
 	QVariant value = unmarsh(reply.arguments().at(0));
-	qDebug() << Q_FUNC_INFO << name << value;
+	//qDebug() << Q_FUNC_INFO << name << value;
 	return value;
     }
 
@@ -108,7 +108,7 @@ private:
 
 	    QVariantMap changedProps = qdbus_cast<QVariantMap>(arguments.at(1).value<QDBusArgument>());
 	    foreach(const QString &prop, changedProps.keys()) {
-	    qDebug() << Q_FUNC_INFO << prop;
+	    //qDebug() << Q_FUNC_INFO << prop;
 		    if (0) { {{range .Properties}}
 		    } else if (prop == "{{.Name}}") {
 			    Q_EMIT __{{Lower .Name}}Changed__();{{end}}
@@ -636,7 +636,6 @@ QVariant unmarshDBus(const QDBusArgument &argument)
     case QDBusArgument::VariantType: {
 
         QVariant v = argument.asVariant().value<QDBusVariant>().variant();
-	qDebug() << Q_FUNC_INFO << v.typeName();
         if (v.userType() == qMetaTypeId<QDBusArgument>())
             return unmarshDBus(v.value<QDBusArgument>());
 	else if (v.userType() == qMetaTypeId<QDBusVariant>())
