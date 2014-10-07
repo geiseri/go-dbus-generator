@@ -2,8 +2,6 @@ package main
 
 import "fmt"
 import "os"
-import "log"
-import "os/exec"
 import "path"
 import "strings"
 import "text/template"
@@ -219,7 +217,7 @@ static TypeMapping __types [] =
 class DBusPlugin: public QQmlExtensionPlugin
 {
     Q_OBJECT
-        Q_PLUGIN_METADATA(IID "com.deepin.dde.daemon.DBus")
+	Q_PLUGIN_METADATA(IID "org.qt-project.Qt.QQmlExtensionInterface")
 
     public:
 
@@ -229,10 +227,6 @@ class DBusPlugin: public QQmlExtensionPlugin
 
 	}
 };
-{{ range $key, $value := GetQtSignaturesType }}
-//TODO: make sure these are unique
-//Q_DECLARE_METATYPE({{$value}})
-{{end}}
 
 ` + _templateMarshUnMarsh + `
 #endif
@@ -243,22 +237,38 @@ TEMPLATE=lib
 CONFIG += plugin
 QT += qml dbus
 
-TARGET = {{PkgName}}
-DESTDIR = lib
-
 OBJECTS_DIRS = tmp
 MOC_DIR = tmp
+DESTDIR = {{PkgPath}}
 
 HEADERS += plugin.h {{range GetModules}}{{.}}.h {{end}}
 
+IMPORT_VERSION = 1.0
+TARGET = $$qtLibraryTarget({{PkgName}})
+TARGETPATH = $$[QT_INSTALL_QML]/{{PkgPath}}
+target.path = $$TARGETPATH
 
-test.depends = lib/$(TARGET)
-test.commands = (qmlscene -I . test.qml)
-QMAKE_EXTRA_TARGETS += test
+INSTALLS += target
+
+QMAKE_EXTRA_TARGETS += check
+check.commands = qmlscene -I . test.qml
+check.depends = first
+
+QMAKE_POST_LINK += qmlplugindump -noinstantiate {{ModuleName}} 1.0 . > plugins.qmltypes
+
+typesout.files = plugins.qmltypes
+typesout.CONFIG = no_check_exist
+typesout.path = $$TARGETPATH
+INSTALLS += typesout
+
+qmldir.files = {{PkgPath}}/qmldir
+qmldir.path = $$TARGETPATH
+INSTALLS += qmldir
+
 `
 
 var __TEST_QML = `
-import {{PkgName}} 1.0
+import {{ModuleName}} 1.0
 import QtQuick 2.0
 import QtQuick.Controls 1.0
 
@@ -291,6 +301,14 @@ Item { {{range .Interfaces}}
 `
 
 func renderQMLProject() {
+
+        moduleName := "DBus"
+	modulePath := "DBus"
+	for _, f := range strings.Split(INFOS.Config.DestName, ".") {
+		moduleName += "." + upper(f)
+		modulePath += "/" + upper(f)
+	}
+
 	writer, err := os.Create(path.Join(INFOS.Config.OutputDir, "tt.pro"))
 	if err != nil {
 		panic(err)
@@ -298,6 +316,8 @@ func renderQMLProject() {
 	template.Must(template.New("main").Funcs(template.FuncMap{
 		"BusType": func() string { return INFOS.Config.BusType },
 		"PkgName": func() string { return INFOS.Config.PkgName },
+		"PkgPath": func() string { return modulePath },
+		"ModuleName": func() string { return moduleName },
 		"GetModules": func() map[string]string {
 			r := make(map[string]string)
 			for _, ifc := range INFOS.Interfaces {
@@ -314,25 +334,26 @@ func testQML() {
 	if pkgName == "" {
 		pkgName = getQMLPkgName("DBus." + INFOS.Config.DestName)
 	}
-	os.MkdirAll(INFOS.Config.OutputDir+"/"+strings.Replace(pkgName, ".", "/", -1), 0755)
-	cmd_str := fmt.Sprintf("cd %s && ln -sv %s lib && qmake", INFOS.Config.OutputDir, strings.Replace(pkgName, ".", "/", -1))
-	cmd := exec.Command("bash", "-c", cmd_str)
-	err := cmd.Run()
-	if err != nil {
-		log.Fatal("Run: " + cmd_str + " failed(Did you have an valid qmake?) testQML code will not generated!")
+
+	moduelPath := "DBus"
+	moduleName := "DBus"
+	for _, f := range strings.Split(INFOS.Config.DestName, ".") {
+		moduleName += "." + upper(f)
+		moduelPath += "/" + upper(f)
 	}
-	qmldir, err := os.Create(path.Join(INFOS.Config.OutputDir, "lib", "qmldir"))
+
+
+	os.MkdirAll(INFOS.Config.OutputDir+"/" + moduelPath, 0755)
+
+	qmldir, err := os.Create(path.Join(INFOS.Config.OutputDir, moduelPath, "qmldir"))
 	if err != nil {
 		panic(err)
 	}
 
-	moduleName := "DBus"
-	for _, f := range strings.Split(INFOS.Config.DestName, ".") {
-		moduleName += "." + upper(f)
-	}
 
 	qmldir.WriteString("module " + moduleName + "\n")
-	qmldir.WriteString("plugin " + INFOS.Config.PkgName)
+	qmldir.WriteString("plugin " + INFOS.Config.PkgName + "\n")
+	qmldir.WriteString("typeinfo plugins.qmltypes\n" )
 	qmldir.Close()
 
 	writer, err := os.Create(path.Join(INFOS.Config.OutputDir, "test.qml"))
@@ -345,6 +366,7 @@ func testQML() {
 		"BusType":          func() string { return INFOS.Config.BusType },
 		"PkgName":          func() string { return pkgName },
 		"Ifc2Obj":          ifc2obj,
+		"ModuleName":       func() string { return moduleName },
 		"GetModules": func() map[string]string {
 			r := make(map[string]string)
 			for _, ifc := range INFOS.Interfaces {
