@@ -22,6 +22,36 @@ var __IFC_TEMPLATE_QML = `
 class {{ExportName}}Proxyer: public QDBusAbstractInterface
 {
     Q_OBJECT
+    void _hookSignals() {
+        connection().connect(service(), path(), "org.freedesktop.DBus.Properties", "PropertiesChanged", parent(), SLOT(_propertiesChanged(QDBusMessage)));
+    {{range .Signals}}
+        connection().connect( service(), path(), interface(), "{{.Name}}", this, SLOT(_handleSignal(QDBusMessage)));{{end}}
+    }
+
+    Q_SLOT void _handleSignal( const QDBusMessage &msg ) {
+	if ( msg.type() == QDBusMessage::SignalMessage ) {
+		if ( msg.interface() != interface() )
+			    return;
+
+		if ( msg.path() != path() )
+			    return;
+
+		QVariantList args;
+		foreach( QVariant arg, msg.arguments() ) {
+			args << unmarsh(arg);
+		}
+
+		if (0) { {{range .Signals}}
+		} else if ( QByteArray("{{.Name}}") == msg.member() ) {
+                     QMetaObject::invokeMethod(parent(), "{{Lower .Name}}" {{range $i, $e := .Args}},
+						Q_ARG({{getQType $e.Type}},args[{{$i}}].value<{{getQType $e.Type}} >()){{end}});{{end}}
+                } else {
+		    qDebug() << "Could not forward" << msg.member();
+		}
+	}
+
+    }
+
 public:
     {{ExportName}}Proxyer(const QString &path, QObject* parent)
           :QDBusAbstractInterface("{{DestName}}", path, "{{IfcName}}", QDBusConnection::{{BusType}}Bus(), parent)
@@ -29,8 +59,15 @@ public:
 	    if (!isValid()) {
 		    qDebug() << "Create {{ExportName}} remote object failed : " << lastError().message();
 	    }
+	    _hookSignals();
     }
-    QVariant fetchProperty(const char* name) {
+
+    ~{{ExportName}}Proxyer() {
+        connection().disconnect(service(), path(), "org.freedesktop.DBus.Properties", "PropertiesChanged",
+	    				 parent(), SLOT(_propertiesChanged(QDBusMessage)));
+    }
+
+    QVariant fetchProperty(const char* name) const {
 	QDBusMessage msg = QDBusMessage::createMethodCall(service(), path(),
 		QLatin1String("org.freedesktop.DBus.Properties"),
 		QLatin1String("Get"));
@@ -45,22 +82,22 @@ public:
 	    qDebug () << QDBusError(QDBusError::InvalidSignature, errmsg.arg(reply.signature()));
 	    return QVariant();
 	}
-
-	QVariant value = qvariant_cast<QDBusVariant>(reply.arguments().at(0)).variant();
+	QVariant value = unmarsh(reply.arguments().at(0));
+	//qDebug() << Q_FUNC_INFO << name << value;
 	return value;
     }
 
 {{range .Properties}}
-    Q_PROPERTY(QDBusVariant {{.Name}} READ __get_{{.Name}}__ {{if PropWritable .}}WRITE __set_{{.Name}}__{{end}})
-    QDBusVariant __get_{{.Name}}__() { return QDBusVariant(fetchProperty("{{.Name}}")); }
-    {{if PropWritable .}}void __set_{{.Name}}__(const QDBusVariant &v) { setProperty("{{.Name}}", QVariant::fromValue(v)); }{{end}}
+    Q_PROPERTY(QVariant {{.Name}} READ __get_{{.Name}}__ {{if PropWritable .}}WRITE __set_{{.Name}}__{{end}})
+    QVariant __get_{{.Name}}__() { return fetchProperty("{{.Name}}"); }
+    {{if PropWritable .}}void __set_{{.Name}}__(const QVariant &v) { setProperty("{{.Name}}", v); }{{end}}
 {{end}}
 
 Q_SIGNALS:{{range .Signals}}
     void {{.Name}}({{range $i, $e := .Args}}{{if ne $i 0}},{{end}}{{getQType $e.Type}} {{$e.Name}}{{end}});{{end}}
 };
 
-class {{ExportName}} : public QObject 
+class {{ExportName}} : public QObject
 {
     Q_OBJECT
 private:
@@ -75,61 +112,54 @@ private:
 
 	    QVariantMap changedProps = qdbus_cast<QVariantMap>(arguments.at(1).value<QDBusArgument>());
 	    foreach(const QString &prop, changedProps.keys()) {
+	    //qDebug() << Q_FUNC_INFO << prop;
 		    if (0) { {{range .Properties}}
 		    } else if (prop == "{{.Name}}") {
-			    Q_EMIT __{{Lower .Name}}Changed__(unmarsh(changedProps.value(prop)));{{end}}
+			    Q_EMIT __{{Lower .Name}}Changed__();{{end}}
 		    }
 	    }
     }
-    void _rebuild() 
-    { 
+    void _rebuild()
+    {
 	  delete m_ifc;
           m_ifc = new {{ExportName}}Proxyer(m_path, this);
-	  _setupSignalHandle();
     }
-    void _setupSignalHandle() {
-{{range .Signals}}
-	  QObject::connect(m_ifc, SIGNAL({{.Name}}({{range $i, $e := .Args}}{{if ne $i 0}},{{end}}{{getQType $e.Type}}{{end}})), 
-	  		this, SIGNAL({{Lower .Name}}({{range $i, $e := .Args}}{{if ne $i 0}},{{end}}{{getQType $e.Type}}{{end}})));
-{{end}}
-    }
+
 public:
     Q_PROPERTY(QString path READ path WRITE setPath NOTIFY pathChanged)
     const QString path() {
 	    return m_path;
     }
     void setPath(const QString& path) {
-	    QDBusConnection::{{BusType}}Bus().disconnect("{{DestName}}", m_path, "org.freedesktop.DBus.Properties", "PropertiesChanged",
-	    				 this, SLOT(_propertiesChanged(QDBusMessage)));
-	    m_path = path;
-	    QDBusConnection::{{BusType}}Bus().connect("{{DestName}}", m_path, "org.freedesktop.DBus.Properties", "PropertiesChanged",
-	    				"sa{sv}as", this, SLOT(_propertiesChanged(QDBusMessage)));
-	    _rebuild();
+	m_path = path;
+	_rebuild();
+
     }
     Q_SIGNAL void pathChanged(QString);
 
     {{ExportName}}(QObject *parent=0) : QObject(parent), m_ifc(new {{ExportName}}Proxyer("{{Ifc2Obj IfcName}}", this))
     {
-	    _setupSignalHandle();
-	    QDBusConnection::{{BusType}}Bus().connect("{{DestName}}", m_path, "org.freedesktop.DBus.Properties", "PropertiesChanged",
-	    				"sa{sv}as", this, SLOT(_propertiesChanged(QDBusMessage)));
+
     }
     {{range .Properties}}
-    Q_PROPERTY(QVariant {{Lower .Name}} READ __get_{{.Name}}__ {{if PropWritable .}}WRITE __set_{{.Name}}__{{end}} NOTIFY __{{Lower .Name}}Changed__){{end}}
+    Q_PROPERTY({{getQType .Type}} {{Lower .Name}} READ __get_{{.Name}}__ {{if PropWritable .}}WRITE __set_{{.Name}}__{{end}} NOTIFY __{{Lower .Name}}Changed__){{end}}
 
     //Property read methods{{range .Properties}}
-    const QVariant __get_{{.Name}}__() { return unmarsh(m_ifc->__get_{{.Name}}__().variant()); }{{end}}
+    {{getQType .Type}} __get_{{.Name}}__() const { return m_ifc->__get_{{.Name}}__().value<{{getQType .Type}} >(); }{{end}}
     //Property set methods :TODO check access{{range .Properties}}{{if PropWritable .}}
-    void __set_{{.Name}}__(const QVariant &v) {
-	    QVariant marshedValue = marsh(QDBusArgument(), v, "{{.Type}}");
-	    m_ifc->__set_{{.Name}}__(QDBusVariant(marshedValue));
-	    Q_EMIT __{{Lower .Name}}Changed__(marshedValue);
+    void __set_{{.Name}}__(const {{getQType .Type}} &v) {
+            if ( v != __get_{{.Name}}__() ) {
+	        QVariant marshedValue = marsh(QDBusArgument(), v, "{{.Type}}");
+	        m_ifc->__set_{{.Name}}__(marshedValue);
+	        Q_EMIT __{{Lower .Name}}Changed__();
+	    }
     }{{end}}{{end}}
 
 public Q_SLOTS:{{range .Methods}}
     QVariant {{.Name}}({{range $i, $e := GetOuts .Args}}{{if ne $i 0}}, {{end}}const QVariant &{{.Name}}{{end}}) {
 	    QList<QVariant> argumentList;
-	    argumentList{{range GetOuts .Args}} << marsh(QDBusArgument(), {{.Name}}, "{{.Type}}"){{end}};
+	    {{range GetOuts .Args}}
+	    argumentList << marsh(QDBusArgument(), {{.Name}}, "{{.Type}}");{{end}}
 
 	    QDBusPendingReply<> call = m_ifc->asyncCallWithArgumentList(QLatin1String("{{.Name}}"), argumentList);
 	    call.waitForFinished();
@@ -157,7 +187,7 @@ public Q_SLOTS:{{range .Methods}}
 
 Q_SIGNALS:
 //Property changed notify signal{{range .Properties}}
-    void __{{Lower .Name}}Changed__(QVariant);{{end}}
+    void __{{Lower .Name}}Changed__();{{end}}
 
 //DBus Interface's signal{{range .Signals}}
     void {{Lower .Name}}({{range $i, $e := .Args}}{{if ne $i 0}},{{end}}{{getQType $e.Type}} {{$e.Name}}{{end}});{{end}}
@@ -177,10 +207,23 @@ var __GLOBAL_TEMPLATE_QML = `
 #include <QQmlExtensionPlugin>
 #include <qqml.h>
 
+struct TypeMapping {
+    QString signature;
+    int metatype;
+};
+
+static TypeMapping __types [] =
+{
+    { QLatin1String("iiii"), qMetaTypeId<QRect>() },
+    {{ range $key, $value := GetQtSignaturesType }}
+        { QLatin1String("{{$key}}"), qDBusRegisterMetaType<{{$value}} >()},{{end}}
+   { QString(), -1 }
+};
+
 class DBusPlugin: public QQmlExtensionPlugin
 {
     Q_OBJECT
-        Q_PLUGIN_METADATA(IID "com.deepin.dde.daemon.DBus")
+	Q_PLUGIN_METADATA(IID "org.qt-project.Qt.QQmlExtensionInterface")
 
     public:
         void registerTypes(const char* uri) { {{range .Interfaces}}
@@ -196,29 +239,44 @@ TEMPLATE=lib
 CONFIG += plugin
 QT += qml dbus
 
-TARGET = {{PkgName}}
-DESTDIR = lib
-
 OBJECTS_DIRS = tmp
 MOC_DIR = tmp
+DESTDIR = {{PkgPath}}
 
 HEADERS += plugin.h {{range GetModules}}{{.}}.h {{end}}
 
+IMPORT_VERSION = 1.0
+TARGET = $$qtLibraryTarget({{PkgName}})
+TARGETPATH = $$[QT_INSTALL_QML]/{{PkgPath}}
+target.path = $$TARGETPATH
 
-test.depends = lib/$(TARGET)
-test.commands = (qmlscene -I . test.qml)
-QMAKE_EXTRA_TARGETS += test
+INSTALLS += target
+
+QMAKE_EXTRA_TARGETS += check
+check.commands = qmlscene -I . test.qml
+check.depends = first
+
+QMAKE_POST_LINK += qmlplugindump -noinstantiate {{ModuleName}} 1.0 . > plugins.qmltypes
+
+typesout.files = plugins.qmltypes
+typesout.CONFIG = no_check_exist
+typesout.path = $$TARGETPATH
+INSTALLS += typesout
+
+qmldir.files = {{PkgPath}}/qmldir
+qmldir.path = $$TARGETPATH
+INSTALLS += qmldir
+
 `
 
 var __TEST_QML = `
-import {{PkgName}} 1.0
+import {{ModuleName}} 1.0
 import QtQuick 2.0
 import QtQuick.Controls 1.0
 
 Item { {{range .Interfaces}}
     {{.ObjectName}} {
        id: "{{Lower .ObjectName}}ID"
-       // path: "{{Ifc2Obj .Interface}}"
     } {{end}}
     width: 400; height: 400
     TabView {
@@ -227,6 +285,7 @@ Item { {{range .Interfaces}}
 	    Tab {   {{$ifc := GetInterfaceInfo .}} {{$objName := Lower .ObjectName }}
 		    title: "{{.ObjectName}}"
 		    Column {
+
 			    {{range $ifc.Properties}}
 			    Row {
 				    Label {
@@ -244,6 +303,14 @@ Item { {{range .Interfaces}}
 `
 
 func renderQMLProject(outputDir string, infos *Infos) {
+
+        moduleName := "DBus"
+	modulePath := "DBus"
+	for _, f := range strings.Split(infos.DestName(), ".") {
+		moduleName += "." + upper(f)
+		modulePath += "/" + upper(f)
+	}
+
 	writer, err := os.Create(path.Join(outputDir, "tt.pro"))
 	if err != nil {
 		panic(err)
@@ -251,6 +318,8 @@ func renderQMLProject(outputDir string, infos *Infos) {
 	template.Must(template.New("main").Funcs(template.FuncMap{
 		"BusType": func() string { return infos.BusType() },
 		"PkgName": func() string { return infos.PackageName() },
+		"PkgPath": func() string { return modulePath },
+		"ModuleName": func() string { return moduleName },
 		"GetModules": func() map[string]string {
 			r := make(map[string]string)
 			for _, ifc := range infos.ListInterfaces() {
@@ -275,18 +344,28 @@ func renderTestQML(infos *Infos) {
 	if err != nil {
 		log.Fatal("Run: " + cmd_str + " failed(Did you have an valid qmake?) testQML code will not generated!")
 	}
-	qmldir, err := os.Create(path.Join(infos.OutputDir(), "lib", "qmldir"))
+
+	moduelPath := "DBus"
+	moduleName := "DBus"
+	for _, f := range strings.Split(infos.DestName(), ".") {
+		moduleName += "." + upper(f)
+		moduelPath += "/" + upper(f)
+	}
+
+
+	os.MkdirAll(infos.OutputDir() + "/" + moduelPath, 0755)
+
+	qmldir, err := os.Create(path.Join(infos.OutputDir(), moduelPath, "qmldir"))
 	if err != nil {
 		panic(err)
 	}
 
-	moduleName := "DBus"
-	for _, f := range strings.Split(infos.DestName(), ".") {
-		moduleName += "." + upper(f)
-	}
 
 	qmldir.WriteString("module " + moduleName + "\n")
+
+	qmldir.WriteString("typeinfo plugins.qmltypes\n" )
 	qmldir.WriteString("plugin " + infos.PackageName())
+
 	qmldir.Close()
 
 	writer, err := os.Create(path.Join(infos.OutputDir(), "test.qml"))
@@ -299,6 +378,7 @@ func renderTestQML(infos *Infos) {
 		"BusType":          func() string { return infos.BusType() },
 		"PkgName":          func() string { return pkgName },
 		"Ifc2Obj":          ifc2obj,
+		"ModuleName":       func() string { return moduleName },
 		"GetModules": func() map[string]string {
 			r := make(map[string]string)
 			for _, ifc := range infos.ListInterfaces() {
@@ -332,9 +412,9 @@ var sigToQtType = map[string]string{
 	"t": "qulonglong",
 	"d": "double",
 	"s": "QString",
-	"g": "QDBusVariant",
+	"v": "QDBusVariant",
 	"o": "QDBusObjectPath",
-	"v": "QDBusSignature",
+	"g": "QDBusSignature",
 	"h": "uint",
 }
 
@@ -342,10 +422,12 @@ func getQtSignaturesType(info *Infos) map[string]string {
 	sigs := make(map[string]string)
 	var store func(string)
 	store = func(sig string) {
-		if v, ok := sigToQtType[sig]; ok {
+		if v, ok := _sig2QType[sig[0]]; ok {
 			sigs[sig] = v
 		} else if sig == "as" {
 			sigs[sig] = "QStringList"
+		} else if sig == "ay" {
+		        sigs[sig] = "QByteArray"
 		} else if sig == "so" {
 			fmt.Println("Warning: `so` isn't supported")
 			sigs[sig] = "QStringList"
@@ -391,15 +473,12 @@ func getQtSignaturesType(info *Infos) map[string]string {
 var _templateMarshUnMarsh = `
 inline
 int getTypeId(const QString& sig) {
-    //TODO: this should staticly generate by xml info
-    if (0) { {{ range $key, $value := GetQtSignaturesType }}
-    } else if (sig == "{{$key}}") {
-	    return qDBusRegisterMetaType<{{$value}} >();{{end}}
-    } else if (sig == "(iiii)") {
-	    return qDBusRegisterMetaType<QRect>();
-    } else {
-	    qDebug() << "Didn't support getTypeId" << sig << " please report it to snyh@snyh.org";
-    }
+    TypeMapping *mapping = __types;
+     while( mapping->signature != QString() ) {
+         if ( mapping->signature == sig ) return mapping->metatype;
+	 mapping++;
+     }
+     return -1;
 }
 
 inline
@@ -425,8 +504,6 @@ QVariant qstring2dbus(QString value, char sig) {
             return QVariant::fromValue(value);
         case 'o':
             return QVariant::fromValue(QDBusObjectPath(value));
-        case 'v':
-            return QVariant::fromValue(QDBusSignature(value));
         default:
             qDebug() << "Dict entry key should be an basic dbus type not an " << sig;
             return QVariant();
@@ -493,40 +570,51 @@ QVariant marsh(QDBusArgument target, const QVariant& arg, const QString& sig) {
         case 'y':
             target << qstring2dbus(arg.value<QString>(), 'y').value<uchar>();
             return QVariant::fromValue(target);
+	    break;
         case 'b':
             target << arg.value<bool>();
             return QVariant::fromValue(target);
+	    break;
         case 'n':
             target << arg.value<short>();
             return QVariant::fromValue(target);
+	    break;
         case 'q':
             target << arg.value<ushort>();
             return QVariant::fromValue(target);
+	    break;
         case 'i':
             target << arg.value<qint32>();
             return QVariant::fromValue(target);
+	    break;
         case 'u':
             target << arg.value<quint32>();
             return QVariant::fromValue(target);
+	    break;
         case 'x':
             target << arg.value<qlonglong>();
             return QVariant::fromValue(target);
+	    break;
         case 't':
             target << arg.value<qulonglong>();
             return QVariant::fromValue(target);
+	    break;
         case 'd':
             target << arg.value<double>();
             return QVariant::fromValue(target);
+	    break;
         case 's':
             target << arg.value<QString>();
             return QVariant::fromValue(target);
+	    break;
         case 'o':
             target << QDBusObjectPath(arg.value<QString>());
             return QVariant::fromValue(target);
+	    break;
         case 'g':
             target << QDBusSignature(arg.value<QString>());
             return QVariant::fromValue(target);
-
+	    break;
         case 'a':
             {
                 if (sig.size() < 2) { return QVariant(); }
@@ -558,6 +646,7 @@ QVariant marsh(QDBusArgument target, const QVariant& arg, const QString& sig) {
                     return QVariant::fromValue(target);
                 }
             }
+	    break;
         case '(':
             {
                 QList<QString> sigs = splitStructureSignature(sig);
@@ -573,8 +662,10 @@ QVariant marsh(QDBusArgument target, const QVariant& arg, const QString& sig) {
                 target.endStructure();
                 return QVariant::fromValue(target);
             }
+	    break;
         default:
             qDebug() << "Panic didn't support marsh" << sig;
+	    break;
     }
     return QVariant::fromValue(target);
 }
@@ -596,6 +687,8 @@ QVariant unmarshDBus(const QDBusArgument &argument)
         QVariant v = argument.asVariant().value<QDBusVariant>().variant();
         if (v.userType() == qMetaTypeId<QDBusArgument>())
             return unmarshDBus(v.value<QDBusArgument>());
+	else if (v.userType() == qMetaTypeId<QDBusVariant>())
+            return v.value<QDBusVariant>().variant();
         else
             return v;
     }
@@ -639,8 +732,10 @@ QVariant unmarsh(const QVariant& v) {
         return QVariant::fromValue(v.value<QDBusObjectPath>().path());
     } else if (v.userType() == qMetaTypeId<QDBusArgument>()) {
         return unmarsh(unmarshDBus(v.value<QDBusArgument>()));
+    } else if (v.userType() == qMetaTypeId<QDBusVariant>()) {
+        return unmarsh( v.value<QDBusVariant>().variant());
     } else if (v.userType() == qMetaTypeId<QByteArray>()) {
-        return QString(v.value<QByteArray>());
+        return QVariant::fromValue(QString::fromLatin1(v.value<QByteArray>()));
     }
     return v;
 }
