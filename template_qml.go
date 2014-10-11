@@ -1,10 +1,13 @@
 package main
 
 import "fmt"
+import "log"
 import "os"
+import "os/exec"
 import "path"
 import "strings"
 import "text/template"
+import "pkg.linuxdeepin.com/lib/dbus"
 
 var __IFC_TEMPLATE_INIT_QML = `/*This file is auto generate by pkg.linuxdeepin.com/dbus-generator. Don't edit it*/
 #include <QtDBus>
@@ -85,10 +88,13 @@ public:
     }
 
 {{range .Properties}}
-    QVariant __get_{{.Name}}__() const { return fetchProperty("{{.Name}}"); }
+    Q_PROPERTY(QDBusVariant {{.Name}} READ __get_{{.Name}}__ {{if PropWritable .}}WRITE __set_{{.Name}}__{{end}})
+    QDBusVariant __get_{{.Name}}__() { return fetchProperty("{{.Name}}"); }
     {{if PropWritable .}}void __set_{{.Name}}__(const QVariant &v) { setProperty("{{.Name}}", v); }{{end}}
 {{end}}
 
+Q_SIGNALS:{{range .Signals}}
+    void {{.Name}}({{range $i, $e := .Args}}{{if ne $i 0}},{{end}}{{getQType $e.Type}} {{$e.Name}}{{end}});{{end}}
 };
 
 class {{ExportName}} : public QObject
@@ -113,8 +119,8 @@ private:
 		    }
 	    }
     }
-    void _rebuild()
-    {
+    void _rebuild() 
+    { 
 	  delete m_ifc;
           m_ifc = new {{ExportName}}Proxyer(m_path, this);
     }
@@ -220,14 +226,10 @@ class DBusPlugin: public QQmlExtensionPlugin
 	Q_PLUGIN_METADATA(IID "org.qt-project.Qt.QQmlExtensionInterface")
 
     public:
-
         void registerTypes(const char* uri) { {{range .Interfaces}}
              qmlRegisterType<{{.ObjectName}}>(uri, 1, 0, "{{.ObjectName}}");{{end}}
-
-
-	}
+        }
 };
-
 ` + _templateMarshUnMarsh + `
 #endif
 `
@@ -300,44 +302,56 @@ Item { {{range .Interfaces}}
 }
 `
 
-func renderQMLProject() {
+func renderQMLProject(outputDir string, infos *Infos) {
 
         moduleName := "DBus"
 	modulePath := "DBus"
-	for _, f := range strings.Split(INFOS.Config.DestName, ".") {
+	for _, f := range strings.Split(infos.DestName(), ".") {
 		moduleName += "." + upper(f)
 		modulePath += "/" + upper(f)
 	}
 
-	writer, err := os.Create(path.Join(INFOS.Config.OutputDir, "tt.pro"))
+	writer, err := os.Create(path.Join(outputDir, "tt.pro"))
 	if err != nil {
 		panic(err)
 	}
 	template.Must(template.New("main").Funcs(template.FuncMap{
-		"BusType": func() string { return INFOS.Config.BusType },
-		"PkgName": func() string { return INFOS.Config.PkgName },
+		"BusType": func() string { return infos.BusType() },
+		"PkgName": func() string { return infos.PkgName() },
 		"PkgPath": func() string { return modulePath },
 		"ModuleName": func() string { return moduleName },
 		"GetModules": func() map[string]string {
 			r := make(map[string]string)
-			for _, ifc := range INFOS.Interfaces {
+			for _, ifc := range infos.ListInterfaces() {
 				r[ifc.OutFile] = ifc.OutFile
 			}
 			return r
 		},
-	}).Parse(__PROJECT_TEMPL_QML)).Execute(writer, INFOS)
+	}).Parse(__PROJECT_TEMPL_QML)).Execute(writer, infos)
 	writer.Close()
+	renderTestQML(infos)
 }
 
-func testQML() {
-	pkgName := INFOS.Config.PkgName
+func renderTestQML(infos *Infos) {
+	pkgName := infos.PackageName()
 	if pkgName == "" {
-		pkgName = getQMLPkgName("DBus." + INFOS.Config.DestName)
+		pkgName = getQMLPkgName("DBus." + infos.DestName())
+	}
+	os.MkdirAll(infos.OutputDir()+"/"+strings.Replace(pkgName, ".", "/", -1), 0755)
+	cmd_str := fmt.Sprintf("cd %s && ln -sv %s lib && qmake", infos.OutputDir(), strings.Replace(pkgName, ".", "/", -1))
+	cmd := exec.Command("bash", "-c", cmd_str)
+	err := cmd.Run()
+	if err != nil {
+		log.Fatal("Run: " + cmd_str + " failed(Did you have an valid qmake?) testQML code will not generated!")
+	}
+	qmldir, err := os.Create(path.Join(infos.OutputDir(), "lib", "qmldir"))
+	if err != nil {
+		panic(err)
 	}
 
 	moduelPath := "DBus"
 	moduleName := "DBus"
-	for _, f := range strings.Split(INFOS.Config.DestName, ".") {
+	for _, f := range strings.Split(infos.DestName(), ".") {
 		moduleName += "." + upper(f)
 		moduelPath += "/" + upper(f)
 	}
@@ -352,31 +366,33 @@ func testQML() {
 
 
 	qmldir.WriteString("module " + moduleName + "\n")
-	qmldir.WriteString("plugin " + INFOS.Config.PkgName + "\n")
+
 	qmldir.WriteString("typeinfo plugins.qmltypes\n" )
+	qmldir.WriteString("plugin " + infos.PackageName())
+
 	qmldir.Close()
 
-	writer, err := os.Create(path.Join(INFOS.Config.OutputDir, "test.qml"))
+	writer, err := os.Create(path.Join(infos.OutputDir(), "test.qml"))
 	if err != nil {
 		panic(err)
 	}
 	template.Must(template.New("qmltest").Funcs(template.FuncMap{
 		"Lower":            lower,
-		"GetInterfaceInfo": GetInterfaceInfo,
-		"BusType":          func() string { return INFOS.Config.BusType },
+		"GetInterfaceInfo": func(ifc _Interface) dbus.InterfaceInfo { return GetInterfaceInfo(infos.InputDir(), ifc) },
+		"BusType":          func() string { return infos.BusType() },
 		"PkgName":          func() string { return pkgName },
 		"Ifc2Obj":          ifc2obj,
 		"ModuleName":       func() string { return moduleName },
 		"GetModules": func() map[string]string {
 			r := make(map[string]string)
-			for _, ifc := range INFOS.Interfaces {
+			for _, ifc := range infos.ListInterfaces() {
 				r[ifc.OutFile] = ifc.OutFile
 			}
 			return r
 		},
-	}).Parse(__TEST_QML)).Execute(writer, INFOS)
-
+	}).Parse(__TEST_QML)).Execute(writer, infos)
 }
+
 func qtPropertyFilter(s string) string {
 	s = strings.TrimSpace(s)
 	if strings.HasPrefix(s, "QMap") {
@@ -389,8 +405,25 @@ func qtPropertyFilter(s string) string {
 	return s
 }
 
-func getQtSignaturesType() (sigs map[string]string) {
-	sigs = make(map[string]string)
+var sigToQtType = map[string]string{
+	"y": "uchar",
+	"b": "bool",
+	"n": "short",
+	"q": "ushort",
+	"i": "int",
+	"u": "uint",
+	"x": "qlonglong",
+	"t": "qulonglong",
+	"d": "double",
+	"s": "QString",
+	"v": "QDBusVariant",
+	"o": "QDBusObjectPath",
+	"g": "QDBusSignature",
+	"h": "uint",
+}
+
+func getQtSignaturesType(info *Infos) map[string]string {
+	sigs := make(map[string]string)
 	var store func(string)
 	store = func(sig string) {
 		if v, ok := _sig2QType[sig]; ok {
@@ -422,8 +455,8 @@ func getQtSignaturesType() (sigs map[string]string) {
 			panic(fmt.Sprintf("parse signature failed:%q\n", sig))
 		}
 	}
-	for _, ifc := range INFOS.Interfaces {
-		info := GetInterfaceInfo(ifc)
+	for _, ifc := range info.ListInterfaces() {
+		info := GetInterfaceInfo(info.InputDir(), ifc)
 		for _, m := range info.Methods {
 			for _, a := range m.Args {
 				store(a.Type)
@@ -443,7 +476,6 @@ func getQtSignaturesType() (sigs map[string]string) {
 
 var _templateMarshUnMarsh = `
 inline
-
 int getTypeId(const QString& sig) {
     TypeMapping *mapping = __types;
      while( mapping->signature != QString() ) {
@@ -656,7 +688,6 @@ QVariant unmarshDBus(const QDBusArgument &argument)
             return v;
     }
     case QDBusArgument::VariantType: {
-
         QVariant v = argument.asVariant().value<QDBusVariant>().variant();
         if (v.userType() == qMetaTypeId<QDBusArgument>())
             return unmarshDBus(v.value<QDBusArgument>());
