@@ -88,8 +88,8 @@ public:
     }
 
 {{range .Properties}}
-    Q_PROPERTY(QDBusVariant {{.Name}} READ __get_{{.Name}}__ {{if PropWritable .}}WRITE __set_{{.Name}}__{{end}})
-    QDBusVariant __get_{{.Name}}__() { return fetchProperty("{{.Name}}"); }
+    Q_PROPERTY(QVariant {{.Name}} READ __get_{{.Name}}__ {{if PropWritable .}}WRITE __set_{{.Name}}__{{end}})
+    QVariant __get_{{.Name}}__() { return fetchProperty("{{.Name}}"); }
     {{if PropWritable .}}void __set_{{.Name}}__(const QVariant &v) { setProperty("{{.Name}}", v); }{{end}}
 {{end}}
 
@@ -119,8 +119,8 @@ private:
 		    }
 	    }
     }
-    void _rebuild() 
-    { 
+    void _rebuild()
+    {
 	  delete m_ifc;
           m_ifc = new {{ExportName}}Proxyer(m_path, this);
     }
@@ -277,7 +277,6 @@ import QtQuick.Controls 1.0
 Item { {{range .Interfaces}}
     {{.ObjectName}} {
        id: "{{Lower .ObjectName}}ID"
-       // path: "{{Ifc2Obj .Interface}}"
     } {{end}}
     width: 400; height: 400
     TabView {
@@ -286,6 +285,7 @@ Item { {{range .Interfaces}}
 	    Tab {   {{$ifc := GetInterfaceInfo .}} {{$objName := Lower .ObjectName }}
 		    title: "{{.ObjectName}}"
 		    Column {
+
 			    {{range $ifc.Properties}}
 			    Row {
 				    Label {
@@ -317,7 +317,7 @@ func renderQMLProject(outputDir string, infos *Infos) {
 	}
 	template.Must(template.New("main").Funcs(template.FuncMap{
 		"BusType": func() string { return infos.BusType() },
-		"PkgName": func() string { return infos.PkgName() },
+		"PkgName": func() string { return infos.PackageName() },
 		"PkgPath": func() string { return modulePath },
 		"ModuleName": func() string { return moduleName },
 		"GetModules": func() map[string]string {
@@ -344,10 +344,6 @@ func renderTestQML(infos *Infos) {
 	if err != nil {
 		log.Fatal("Run: " + cmd_str + " failed(Did you have an valid qmake?) testQML code will not generated!")
 	}
-	qmldir, err := os.Create(path.Join(infos.OutputDir(), "lib", "qmldir"))
-	if err != nil {
-		panic(err)
-	}
 
 	moduelPath := "DBus"
 	moduleName := "DBus"
@@ -357,9 +353,9 @@ func renderTestQML(infos *Infos) {
 	}
 
 
-	os.MkdirAll(INFOS.Config.OutputDir+"/" + moduelPath, 0755)
+	os.MkdirAll(infos.OutputDir() + "/" + moduelPath, 0755)
 
-	qmldir, err := os.Create(path.Join(INFOS.Config.OutputDir, moduelPath, "qmldir"))
+	qmldir, err := os.Create(path.Join(infos.OutputDir(), moduelPath, "qmldir"))
 	if err != nil {
 		panic(err)
 	}
@@ -431,7 +427,7 @@ func getQtSignaturesType(info *Infos) map[string]string {
 		} else if sig == "as" {
 			sigs[sig] = "QStringList"
 		} else if sig == "ay" {
-		        sigs[sig] = "QString"
+		        sigs[sig] = "QByteArray"
 		} else if sig == "so" {
 			fmt.Println("Warning: `so` isn't supported")
 			sigs[sig] = "QStringList"
