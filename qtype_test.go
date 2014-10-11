@@ -3,21 +3,26 @@ package main
 
 import "testing"
 
-import C "launchpad.net/gocheck"
-
-type testWrap struct{}
-
-func Test(t *testing.T) { C.TestingT(t) }
-func init() {
-	C.Suite(&testWrap{})
-}
-
-func (*testWrap) TestQtType(c *C.C) {
-	c.Check(getQType("u"), C.Equals, "uint")
-	c.Check(getQType("ah"), C.Equals, "QList<quint32 >")
-	c.Check(getQType("au"), C.Equals, "QList<uint >")
-	c.Check(getQType("ao"), C.Equals, "QList<QDBusObjectPath >")
-	c.Check(getQType("as"), C.Equals, "QList<QString >")
-	c.Check(getQType("av"), C.Equals, "QList<QDBusVariant >")
-	c.Check(getQType("a{ss}"), C.Equals, "QMap<QString, QString >")
+func TestQType(t *testing.T) {
+	if getQType("u") != "uint" {
+		t.Fatal(` "u" != "uint" ` + getQType("u"))
+	}
+	if getQType("ah") != "QList<quint32 >" {
+		t.Fatal(` "ah" != "QList<quint32 >" ` + getQType("ah"))
+	}
+	if getQType("au") != "QList<uint >" {
+		t.Fatal(` "au" != "QList<uint >" ` + getQType("au"))
+	}
+	if getQType("ao") != "QStringList" {
+		t.Fatal(` "ao" != "QStringList" ` + getQType("ao"))
+	}
+	if getQType("as") != "QStringList" {
+		t.Fatal(` "as" != "QStringList" ` + getQType("as"))
+	}
+	if getQType("av") != "QVariantList" {
+		t.Fatal(` "av" != "QVariantList" ` + getQType("av"))
+	}
+	if getQType("a{ss}") != "QVariantMap" {
+		t.Fatal(` "a{ss}" != "QVariantMap" ` + getQType("a{ss}"))
+	}
 }
