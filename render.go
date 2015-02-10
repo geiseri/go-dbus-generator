@@ -2,8 +2,8 @@ package main
 
 import "fmt"
 import "text/template"
-import "pkg.linuxdeepin.com/lib/dbus"
-import "pkg.linuxdeepin.com/lib/dbus/introspect"
+import "github.com/guelfey/go.dbus"
+import "github.com/guelfey/go.dbus/introspect"
 import "io"
 import "log"
 import "strings"

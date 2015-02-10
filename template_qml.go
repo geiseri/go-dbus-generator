@@ -7,7 +7,7 @@ import "os/exec"
 import "path"
 import "strings"
 import "text/template"
-import "pkg.linuxdeepin.com/lib/dbus/introspect"
+import "github.com/guelfey/go.dbus/introspect"
 
 var __IFC_TEMPLATE_INIT_QML = `/*This file is auto generate by pkg.linuxdeepin.com/dbus-generator. Don't edit it*/
 #include <QtDBus>
@@ -119,8 +119,8 @@ private:
 		    }
 	    }
     }
-    void _rebuild() 
-    { 
+    void _rebuild()
+    {
 	  delete m_ifc;
           m_ifc = new {{ExportName}}Proxyer(m_path, this);
     }
