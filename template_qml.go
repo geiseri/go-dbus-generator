@@ -7,12 +7,13 @@ import "os/exec"
 import "path"
 import "strings"
 import "text/template"
-import "pkg.linuxdeepin.com/lib/dbus"
+import "pkg.linuxdeepin.com/lib/dbus/introspect"
 
 var __IFC_TEMPLATE_INIT_QML = `/*This file is auto generate by pkg.linuxdeepin.com/dbus-generator. Don't edit it*/
 #include <QtDBus>
 QVariant unmarsh(const QVariant&);
 QVariant marsh(QDBusArgument target, const QVariant& arg, const QString& sig);
+QVariant translateI18n(const char* dir, const char* domain,  const QVariant v);
 `
 
 var __IFC_TEMPLATE_QML = `
@@ -112,15 +113,14 @@ private:
 
 	    QVariantMap changedProps = qdbus_cast<QVariantMap>(arguments.at(1).value<QDBusArgument>());
 	    foreach(const QString &prop, changedProps.keys()) {
-	    //qDebug() << Q_FUNC_INFO << prop;
 		    if (0) { {{range .Properties}}
 		    } else if (prop == "{{.Name}}") {
 			    Q_EMIT __{{Lower .Name}}Changed__();{{end}}
 		    }
 	    }
     }
-    void _rebuild()
-    {
+    void _rebuild() 
+    { 
 	  delete m_ifc;
           m_ifc = new {{ExportName}}Proxyer(m_path, this);
     }
@@ -223,13 +223,23 @@ static TypeMapping __types [] =
 class DBusPlugin: public QQmlExtensionPlugin
 {
     Q_OBJECT
-	Q_PLUGIN_METADATA(IID "org.qt-project.Qt.QQmlExtensionInterface")
+        Q_PLUGIN_METADATA(IID "com.deepin.dde.daemon.DBus")
 
     public:
         void registerTypes(const char* uri) { {{range .Interfaces}}
              qmlRegisterType<{{.ObjectName}}>(uri, 1, 0, "{{.ObjectName}}");{{end}}
         }
 };
+
+#include <libintl.h>
+QVariant translateI18n(const char* dir, const char* domain,  const QVariant v)
+{
+	if (v.type() != QMetaType::QString) {
+		return v;
+	}
+	bindtextdomain(domain, dir);
+	return QVariant::fromValue<QString>(dgettext(domain, v.toString().toLocal8Bit()));
+}
 ` + _templateMarshUnMarsh + `
 #endif
 `
@@ -238,6 +248,9 @@ var __PROJECT_TEMPL_QML = `
 TEMPLATE=lib
 CONFIG += plugin
 QT += qml dbus
+
+TARGET = {{PkgName}}
+DESTDIR = lib
 
 OBJECTS_DIRS = tmp
 MOC_DIR = tmp
@@ -277,6 +290,7 @@ import QtQuick.Controls 1.0
 Item { {{range .Interfaces}}
     {{.ObjectName}} {
        id: "{{Lower .ObjectName}}ID"
+       // path: "{{Ifc2Obj .Interface}}"
     } {{end}}
     width: 400; height: 400
     TabView {
@@ -285,7 +299,6 @@ Item { {{range .Interfaces}}
 	    Tab {   {{$ifc := GetInterfaceInfo .}} {{$objName := Lower .ObjectName }}
 		    title: "{{.ObjectName}}"
 		    Column {
-
 			    {{range $ifc.Properties}}
 			    Row {
 				    Label {
@@ -365,7 +378,6 @@ func renderTestQML(infos *Infos) {
 
 	qmldir.WriteString("typeinfo plugins.qmltypes\n" )
 	qmldir.WriteString("plugin " + infos.PackageName())
-
 	qmldir.Close()
 
 	writer, err := os.Create(path.Join(infos.OutputDir(), "test.qml"))
@@ -374,7 +386,7 @@ func renderTestQML(infos *Infos) {
 	}
 	template.Must(template.New("qmltest").Funcs(template.FuncMap{
 		"Lower":            lower,
-		"GetInterfaceInfo": func(ifc _Interface) dbus.InterfaceInfo { return GetInterfaceInfo(infos.InputDir(), ifc) },
+		"GetInterfaceInfo": func(ifc _Interface) introspect.InterfaceInfo { return GetInterfaceInfo(infos.InputDir(), ifc) },
 		"BusType":          func() string { return infos.BusType() },
 		"PkgName":          func() string { return pkgName },
 		"Ifc2Obj":          ifc2obj,
@@ -504,6 +516,8 @@ QVariant qstring2dbus(QString value, char sig) {
             return QVariant::fromValue(value);
         case 'o':
             return QVariant::fromValue(QDBusObjectPath(value));
+        case 'v':
+            return QVariant::fromValue(QDBusSignature(value));
         default:
             qDebug() << "Dict entry key should be an basic dbus type not an " << sig;
             return QVariant();

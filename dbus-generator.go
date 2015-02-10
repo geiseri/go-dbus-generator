@@ -1,15 +1,14 @@
 package main
 
 import "path"
-import "encoding/xml"
 import "os"
 import "flag"
+import "fmt"
 import "os/exec"
 
-//TODO: remove pkg.linuxdeepin.com/lib/dbus
-import "pkg.linuxdeepin.com/lib/dbus"
+import "pkg.linuxdeepin.com/lib/dbus/introspect"
 
-func GetInterfaceInfo(inputdir string, ifc _Interface) dbus.InterfaceInfo {
+func GetInterfaceInfo(inputdir string, ifc _Interface) introspect.InterfaceInfo {
 	inFile := path.Join(inputdir, ifc.XMLFile)
 	_, err := os.Stat(inFile)
 	if err != nil {
@@ -17,19 +16,21 @@ func GetInterfaceInfo(inputdir string, ifc _Interface) dbus.InterfaceInfo {
 	}
 
 	reader, err := os.Open(inFile)
+	defer reader.Close()
 	if err != nil {
 		panic(err.Error() + "(File:" + inFile + ")")
 	}
 
-	decoder := xml.NewDecoder(reader)
-	obj := dbus.NodeInfo{}
-	decoder.Decode(&obj)
+	obj, err := introspect.Parse(reader)
+	if err != nil {
+		panic(err.Error() + "(File:" + inFile + ")")
+	}
+
 	for _, ifcInfo := range obj.Interfaces {
 		if ifcInfo.Name == ifc.Interface {
 			return ifc.handlleBlackList(ifcInfo)
 		}
 	}
-	reader.Close()
 	panic("Not Found Interface " + ifc.Interface)
 }
 
@@ -40,9 +41,9 @@ type _Interface struct {
 	BlackSignals                                                        []string
 }
 
-func (ifc _Interface) handlleBlackList(data dbus.InterfaceInfo) dbus.InterfaceInfo {
+func (ifc _Interface) handlleBlackList(data introspect.InterfaceInfo) introspect.InterfaceInfo {
 	for _, name := range ifc.BlackMethods {
-		var methods []dbus.MethodInfo
+		var methods []introspect.MethodInfo
 		for _, mInfo := range data.Methods {
 			if mInfo.Name != name {
 				methods = append(methods, mInfo)
@@ -51,7 +52,7 @@ func (ifc _Interface) handlleBlackList(data dbus.InterfaceInfo) dbus.InterfaceIn
 		data.Methods = methods
 	}
 	for _, name := range ifc.BlackProperties {
-		var properties []dbus.PropertyInfo
+		var properties []introspect.PropertyInfo
 		for _, pInfo := range data.Properties {
 			if pInfo.Name != name {
 				properties = append(properties, pInfo)
@@ -60,7 +61,7 @@ func (ifc _Interface) handlleBlackList(data dbus.InterfaceInfo) dbus.InterfaceIn
 		data.Properties = properties
 	}
 	for _, name := range ifc.BlackSignals {
-		var signals []dbus.SignalInfo
+		var signals []introspect.SignalInfo
 		for _, sInfo := range data.Signals {
 			if sInfo.Name != name {
 				signals = append(signals, sInfo)
@@ -72,7 +73,7 @@ func (ifc _Interface) handlleBlackList(data dbus.InterfaceInfo) dbus.InterfaceIn
 }
 
 func renderedEnd(infos *Infos) {
-	switch BindingTarget(infos.Config.Target) {
+	switch infos.Target() {
 	case GoLang:
 		exec.Command("gofmt", "-w", infos.OutputDir()).Run()
 	case QML:
@@ -84,25 +85,23 @@ func geneateInit(infos *Infos) {
 	for _, ifc := range infos.ListInterfaces() {
 		writer, newOne := infos.GetWriter(ifc.OutFile)
 		if newOne {
-			renderInterfaceInit(writer, GetTemplate(BindingTarget(infos.Target()), TemplateTypeInit), infos)
+			renderInterfaceInit(writer, GetTemplate(infos.Target(), TemplateTypeInit), infos)
 		}
 	}
 
 }
 
 func generateMain(infos *Infos) {
-	target := BindingTarget(infos.Target())
-
-	switch target {
+	switch infos.Target() {
 	case GoLang:
 		writer, _ := infos.GetWriter("init")
-		renderMain(writer, GetTemplate(target, TemplateTypeGlobal), infos)
+		renderMain(writer, GetTemplate(GoLang, TemplateTypeGlobal), infos)
 	case PyQt:
 		writer, _ := infos.GetWriter("__init__")
-		renderMain(writer, GetTemplate(target, TemplateTypeGlobal), infos)
+		renderMain(writer, GetTemplate(PyQt, TemplateTypeGlobal), infos)
 	case QML:
 		writer, _ := infos.GetWriter("plugin.h")
-		renderMain(writer, GetTemplate(target, TemplateTypeGlobal), infos)
+		renderMain(writer, GetTemplate(QML, TemplateTypeGlobal), infos)
 	}
 
 	for _, ifc := range infos.ListInterfaces() {
@@ -116,19 +115,23 @@ func generateMain(infos *Infos) {
 		}
 
 		info := GetInterfaceInfo(infos.InputDir(), ifc)
-		renderInterface(target, info, writer, ifc.Interface, ifc.ObjectName, infos)
+		renderInterface(infos.Target(), info, writer, ifc.Interface, ifc.ObjectName, infos)
 	}
 }
 
 func main() {
 	var outputPath, inputFile, target string
-	flag.StringVar(&outputPath, "out", "out", "the directory to save the generated code")
+	flag.StringVar(&outputPath, "out", "", "the directory to save the generated code")
 	flag.StringVar(&inputFile, "in", "dbus.in.json", "the config file path")
 	flag.StringVar(&target, "target", "", "now support QML/PyQt/GoLang target")
 	flag.Parse()
 
-	infos := loadInfos(inputFile)
-	infos.normalize(outputPath, target)
+	infos, err := LoadInfos(inputFile, outputPath, target)
+	if err != nil {
+		fmt.Printf("Can't load info file (%q), please check it. \nError:%s\n\n", inputFile, err.Error())
+		flag.Usage()
+		return
+	}
 
 	geneateInit(infos)
 	generateMain(infos)
