@@ -113,6 +113,7 @@ private:
 
 	    QVariantMap changedProps = qdbus_cast<QVariantMap>(arguments.at(1).value<QDBusArgument>());
 	    foreach(const QString &prop, changedProps.keys()) {
+	    //qDebug() << Q_FUNC_INFO << prop;
 		    if (0) { {{range .Properties}}
 		    } else if (prop == "{{.Name}}") {
 			    Q_EMIT __{{Lower .Name}}Changed__();{{end}}
@@ -223,7 +224,7 @@ static TypeMapping __types [] =
 class DBusPlugin: public QQmlExtensionPlugin
 {
     Q_OBJECT
-        Q_PLUGIN_METADATA(IID "com.deepin.dde.daemon.DBus")
+	Q_PLUGIN_METADATA(IID "org.qt-project.Qt.QQmlExtensionInterface")
 
     public:
         void registerTypes(const char* uri) { {{range .Interfaces}}
@@ -248,9 +249,6 @@ var __PROJECT_TEMPL_QML = `
 TEMPLATE=lib
 CONFIG += plugin
 QT += qml dbus
-
-TARGET = {{PkgName}}
-DESTDIR = lib
 
 OBJECTS_DIRS = tmp
 MOC_DIR = tmp
@@ -290,7 +288,6 @@ import QtQuick.Controls 1.0
 Item { {{range .Interfaces}}
     {{.ObjectName}} {
        id: "{{Lower .ObjectName}}ID"
-       // path: "{{Ifc2Obj .Interface}}"
     } {{end}}
     width: 400; height: 400
     TabView {
@@ -299,6 +296,7 @@ Item { {{range .Interfaces}}
 	    Tab {   {{$ifc := GetInterfaceInfo .}} {{$objName := Lower .ObjectName }}
 		    title: "{{.ObjectName}}"
 		    Column {
+
 			    {{range $ifc.Properties}}
 			    Row {
 				    Label {
@@ -378,6 +376,7 @@ func renderTestQML(infos *Infos) {
 
 	qmldir.WriteString("typeinfo plugins.qmltypes\n" )
 	qmldir.WriteString("plugin " + infos.PackageName())
+
 	qmldir.Close()
 
 	writer, err := os.Create(path.Join(infos.OutputDir(), "test.qml"))
@@ -516,8 +515,6 @@ QVariant qstring2dbus(QString value, char sig) {
             return QVariant::fromValue(value);
         case 'o':
             return QVariant::fromValue(QDBusObjectPath(value));
-        case 'v':
-            return QVariant::fromValue(QDBusSignature(value));
         default:
             qDebug() << "Dict entry key should be an basic dbus type not an " << sig;
             return QVariant();

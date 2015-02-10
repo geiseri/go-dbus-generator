@@ -49,8 +49,16 @@ func getQType(sig string) string {
 	case 'a':
 		if sig[1] == '{' {
 			i := strings.LastIndex(sig, "}")
-			if getQType(string(sig[2])) == "QString" {
-				return "QVariantMap"
+			r := "QMap<"
+			r += getQType(string(sig[2])) + ", "
+			r += getQType(sig[3:i])
+			r += " >"
+			if r == "QMap<QString, QVariant >" {
+			    return "QVariantMap"
+			} else if r == "QMap<QString, QVariantMap >" {
+                             return "QVariantMap"
+			} else if r == "QMap<QString, QDBusVariant >" {
+			    return "QVariantMap"
 			} else {
 				r := "QMap<"
 				r += getQType(string(sig[2])) + ", "
